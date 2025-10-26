@@ -1,0 +1,117 @@
+#--- Ensembl Gene Annotation ----------------------------#
+
+library(biomaRt)
+
+# Connect directly to archived Ensembl v113 (Oct 2024) to ensure reproducibility
+ensembl_113 <- useEnsembl(
+  biomart = "genes",
+  dataset = "hsapiens_gene_ensembl",
+  host = "https://oct2024.archive.ensembl.org"
+)
+
+# Retrieve gene annotation for your dataset
+gene_annot_all_Disc <- getBM(
+  attributes = c(
+    "ensembl_gene_id", "chromosome_name", "start_position", "end_position",
+    "strand", "external_gene_name", "description", "gene_biotype"
+  ),
+  filters = "external_gene_name",
+  values = rownames(counts.Disc.all),
+  mart = ensembl_113
+)
+
+# Check for duplicate gene names
+table(duplicated(gene_annot_all_Disc$external_gene_name))
+
+# Save annotation
+write.table(
+  gene_annot_all_Disc,
+  file = "file path/Gene_annot_all.txt",
+  sep = "\t", row.names = FALSE, quote = FALSE
+)
+
+# Save workspace
+save.image("Gene.Annot.All")
+
+#--- 3. Gene Annotation Data----
+#Duplicates Removed Manually
+Disc.Gene.Annot.Curated <- read.delim("~/NCA.ER/Gene_Annot_All_Used_ENS113.txt")
+table(duplicated(Disc.Gene.Annot.Curated$external_gene_name))
+#FALSE
+#18515
+
+dim(Disc.Gene.Annot.Curated)
+#[1] 18515     7
+length(Disc.Gene.Annot.Curated)
+View(Disc.Gene.Annot.Curated)
+dim(counts.Disc.genes)
+#[1] 19219  988
+
+#Only Validated IDs Taken
+# Extract gene IDs from both datasets
+ensemble_ids <- Disc.Gene.Annot.Curated$external_gene_name
+View(ensemble_ids)
+ensemble_ids <- sort(ensemble_ids)
+length(ensemble_ids) #[1] 18515
+
+Disc_all_gene_ids <- rownames(counts.Disc.genes )
+View(Disc_all_gene_ids)
+
+common_genes <- intersect(Disc.Gene.Annot.Curated$external_gene_name, Disc_all_gene_ids) # Should match or be close to 1420
+common_genes <- sort(common_genes)
+all.equal(ensemble_ids, common_genes) #[1] TRUE
+length(common_genes)
+#[1] 18515
+
+# Subset and reorder both datasets to only include common samples
+counts.Disc.genes <- counts.Disc.genes[common_genes, ]
+View(counts.Disc.genes)
+
+all.equal(ensemble_ids,rownames(counts.Disc.genes))
+
+#Set rownames for gene annotation, %n% doesn't let your data go NA
+Disc.Gene.Annot.Curated <- Disc.Gene.Annot.Curated[Disc.Gene.Annot.Curated$external_gene_name %in% common_genes, ]
+rownames(Disc.Gene.Annot.Curated) <- Disc.Gene.Annot.Curated$external_gene_name
+Disc.Gene.Annot.Curated <- Disc.Gene.Annot.Curated[order(rownames(Disc.Gene.Annot.Curated)),]
+View(Disc.Gene.Annot.Curated)
+all.equal(Disc.Gene.Annot.Curated$external_gene_name, rownames(counts.Disc.genes))
+all.equal(Disc.Gene.Annot.Curated$external_gene_name,rownames(Disc.Gene.Annot.Curated))
+all.equal(Disc.Gene.Annot.Curated$external_gene_name,common_genes)
+all.equal(common_genes,ensemble_ids)
+
+#Sort counts.Disc.genes and gene_annot_all_Disc based on rownames which is gene names
+counts.Disc.genes <- counts.Disc.genes[order(rownames(counts.Disc.genes)), ]
+Disc.Gene.Annot.Curated <- Disc.Gene.Annot.Curated[order(rownames(Disc.Gene.Annot.Curated)), ]
+
+all.equal(rownames(counts.Disc.genes), rownames(Disc.Gene.Annot.Curated))  #[1] TRUE
+dim(counts.Disc.genes) #[1] 18515   988
+dim(Disc.Gene.Annot.Curated) #[1] 18515     7
+View(Disc.Gene.Annot.Curated)
+
+#In rtni analysis it needs "SYMBOL" in rowAnnotation
+colnames(Disc.Gene.Annot.Curated)
+colnames(Disc.Gene.Annot.Curated)[colnames(Disc.Gene.Annot.Curated) == "external_gene_name"] <- "SYMBOL"
+colnames(Disc.Gene.Annot.Curated)[colnames(Disc.Gene.Annot.Curated) == "ensembl_gene_id"] <- "ENSEMBL"
+
+# Verify the change
+colnames(Disc.Gene.Annot.Curated)
+
+
+# One final check:
+stopifnot(rownames(Disc.Gene.Annot.Curated) == rownames(counts.Disc.genes), # features
+          rownames(sampleAnnotation.Disc) == colnames(counts.Disc.genes)) # samples
+
+save(list = ls(), file = file.path("~/NCA.ER/NCA.MP.TF.DISC.NCA/", "1.Data before List.RData")
+
+
+
+#One can alternatively use the code below(In our case wasn't done like this)
+library(biomaRt)
+mart <- useMart('ENSEMBL_MART_ENSEMBL')
+mart <- useDataset('hsapiens_gene_ensembl', mart)
+
+annot <- getBM(values = rownames(DISC.Genes), filters = "external_gene_name",mart = mart,
+               attributes = c("ensembl_gene_id", "chromosome_name",
+                              "start_position", "end_position", "strand","gene_biotype",
+                              "external_gene_name","description"))
+table(duplicated(annot$external_gene_name))
