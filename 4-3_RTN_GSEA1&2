@@ -1,9 +1,8 @@
-#---Load libraries-----------------
 library(RTN)
-#---1.Load Gene Expression Data of 90 metabolic pathways and TFs = a mtrix for counts/assays---------------------------------
-#load gene expression txt. Format
+#-----------load gene expression txt. Format--------------
 disc.mp.tf <- read.delim("Significant Regulons' Gene Expression anf TF Genes' Expression in Discovery Dataset as a .txt file",header = TRUE,row.names = 1)
-#---5.Create tni_disc.mp.tf list-----------------------
+
+#---Create tni_disc.mp.tf list-----------------------
 counts.disc.mp.tf <- as.matrix(counts.disc.mp.tf)
 View(counts.disc.mp.tf)
 str(counts.disc.mp.tf)
@@ -23,7 +22,7 @@ View(tni_disc.mp.tf)
 
 save(list = ls(),file = "1.tniData.RData")
 
-#---6.RegulatoryElements-----------------
+#---RegulatoryElements-----------------
 
 # Load TF annotation
 data("tfsData")
@@ -36,7 +35,7 @@ View(regulatoryElements)
 regulatoryElements <- sort(regulatoryElements)
 View(regulatoryElements)
 
-#---7.Run the TNI constructor with the extracted matrix for tni_disc.mp.tf--------------
+#---Run the TNI constructor with the extracted matrix for tni_disc.mp.tf--------------
 #This dataset consists of a list with 3 objects:
 ##a named gene expression matrix (tniData$expData),
 ##a data frame with gene annotations (tniData$rowAnnotation), 
@@ -52,21 +51,6 @@ rtni_disc_mp.tf <- tni.constructor(expData = tni_disc.mp.tf$expData,
 #--Checking 'regulatoryElements' in 'rowAnnotation'...
 #--Checking 'expData'...
 #-Preprocessing complete!
-
-
-all.equal(colnames(tni_disc.mp.tf$expData), rownames(sampleAnnotation.disc))  # Should return TRUE
-all.equal(tni_disc.mp.tf$expData, counts.disc.mp.tf)
-all.equal(tni_disc.mp.tf$colAnnotation, sampleAnnotation.disc)
-
-all.equal(tni_disc.mp.tf$rowAnnotation,tni_disc.mp.tf$rowAnnotation)
-#[1] TRUE
-all.equal(tni_disc.mp.tf$colAnnotation,tni_disc.mp.tf$colAnnotation)
-#[1] TRUE
-all.equal(tni_disc.mp.tf$expData,tni_disc.mp.tf$expData)
-#[1] TRUE
-
-save.image("4.rtni.disc.RData")
-
 
 #1.with pValuCutoff =1e-7 it gives 0 values, even in the summary
 #rtni_disc_mp.tf.dpi <- tni.permutation(rtni_disc_mp.tf.dpi, pValueCutoff = 1e-7) #pValueCutoff=1e-7 ?? zero_values
@@ -107,6 +91,7 @@ tni.regulon.summary(rtni_disc_mp.tf.NA)
 # Save the TNI object for subsequent analyses
 save(list = ls(),file = "6.Disc.rtni.NA.RData")
 save(rtni_disc_mp.tf.NA,file = "Disc.rtni.NA.forDEG.RData")
+
 #detailed information about a specific regulon
 tni.regulon.summary(rtni_disc_mp.tf.NA, regulatoryElements = "GATA3")
 
@@ -171,8 +156,7 @@ regulon_df <- do.call(cbind, regulon_list)
 # Write to file
 write.table(regulon_df, file = "Disc.regulon.NA.txt", sep = "\t", row.names = FALSE, quote = FALSE)
 save(regulon.NA,file = "Disc.Regulon.NA.RData")
-save.image("7.Disc.before.DEG.RData")
-#---8.Linear DEG,Limma-----------
+#---Linear DEG,Limma-----------
 
 #Since the samples are the same sampleAnnotation.disc_tna will be used
 Disc.MP.Genes <- read.delim("DISC.MP.Genes.txt",header = TRUE, row.names = 1)
@@ -249,15 +233,6 @@ save(phenotype_mp_pos,file = paste0("Disc.DEG.",Sys.Date(),".RData"))
 View(phenotype_mp_pos)
 dim(phenotype_mp_pos)  #[1] 1420    6
 
-d.se.info <- sessionInfo()
-save("regulon.NA",file = paste0("Disc.288.regulon.NA_",Sys.Date(),".RData"))
-save(list = ls(),file = "8.Disc.MP.288tf.RData")
-save.image("9.Disc.MP.288tf.RData")
-save(list = c("rtni_disc_mp.tf.NA","regulon.NA","gsea1_disc.mp_h2","gsea1_disc.mp_p","gsea2_disc.mp_h2","gsea2_disc.mp_p","mra_disc.mp_h2","mra_disc.mp_p"), file = paste0("Network.Disc.MP.288TF_",Sys.Date(),".RData"))
-write.table(regulatoryElements,file = paste0("Disc.294TF_RegulatoryElements_",Sys.Date(),".txt"),sep = "\t",row.names = FALSE)
-
-
-
 #Conditions-----------------
 #Error: NOTE: all names in 'phenotype' should be available in col1 of 'phenoIDs'!
 library(dplyr)
@@ -291,7 +266,7 @@ tna.disc_mp_p <- list(
 
 View(tna.disc_mp_p)
 save(phenotype_mp_pos,logFC_disc_mp_p,file = "C3.Differential.Exp.Disc.MP.RData")
-#---9.RTNA----
+#---RTNA----
 # Input 1: 'object', a TNI object with regulons
 # Input 2: 'phenotype', a named numeric vector, usually log2 differential expression levels
 # Input 3: 'hits', a character vector, usually a set of differentially expressed genes
@@ -390,4 +365,53 @@ write.table(gsea2_disc.mp_p,file = "C3.DISC.tna.gsea2.mp.txt",sep = "\t",row.nam
 # Plot GSEA-2T results
 tna.plot.gsea2(rtna_disc.mp_p, labPheno="log2 fold changes", tfs="CBX2", file = "C3.Disc.gsea2_mp_phenotype")
                         
+sessionInfo()
+R version 4.4.1 (2024-06-14 ucrt)
+Platform: x86_64-w64-mingw32/x64
+Running under: Windows 11 x64 (build 26100)
+
+Matrix products: default
+  LAPACK version 3.12.0
+
+locale:
+[1] LC_COLLATE=English_United Arab Emirates.utf8  LC_CTYPE=English_United Arab Emirates.utf8   
+[3] LC_MONETARY=English_United Arab Emirates.utf8 LC_NUMERIC=C                                 
+[5] LC_TIME=English_United Arab Emirates.utf8    
+
+time zone: Asia/Dubai
+tzcode source: internal
+
+attached base packages:
+[1] grid      stats     graphics  grDevices utils     datasets  methods   base     
+
+other attached packages:
+[1] gridExtra_2.3   pheatmap_1.0.12 RTN_2.28.0      limma_3.60.6   
+
+loaded via a namespace (and not attached):
+ [1] SummarizedExperiment_1.34.0 gtable_0.3.6                ggplot2_3.5.1              
+ [4] htmlwidgets_1.6.4           Biobase_2.64.0              lattice_0.22-6             
+ [7] vctrs_0.6.5                 tools_4.4.1                 generics_0.1.3             
+[10] stats4_4.4.1                parallel_4.4.1              tibble_3.2.1               
+[13] proxy_0.4-27                pkgconfig_2.0.3             Matrix_1.7-2               
+[16] KernSmooth_2.23-24          data.table_1.17.0           RColorBrewer_1.1-3         
+[19] S4Vectors_0.42.1            lifecycle_1.0.4             GenomeInfoDbData_1.2.12    
+[22] farver_2.1.2                compiler_4.4.1              viper_1.38.0               
+[25] mixtools_2.0.0              statmod_1.5.0               munsell_0.5.1              
+[28] carData_3.0-5               GenomeInfoDb_1.40.1         snow_0.4-4                 
+[31] htmltools_0.5.8.1           class_7.3-22                lazyeval_0.2.2             
+[34] Formula_1.2-5               plotly_4.10.4               car_3.1-3                  
+[37] pillar_1.10.1               crayon_1.5.3                tidyr_1.3.1                
+[40] MASS_7.3-65                 DelayedArray_0.30.1         RedeR_3.0.0                
+[43] abind_1.4-8                 nlme_3.1-167                tidyselect_1.2.1           
+[46] digest_0.6.37               dplyr_1.1.4                 kernlab_0.9-33             
+[49] purrr_1.0.2                 splines_4.4.1               fastmap_1.2.0              
+[52] SparseArray_1.4.8           colorspace_2.1-1            cli_3.6.3                  
+[55] magrittr_2.0.3              S4Arrays_1.4.1              survival_3.8-3             
+[58] e1071_1.7-16                scales_1.3.0                UCSC.utils_1.0.0           
+[61] minet_3.62.0                segmented_2.1-4             XVector_0.44.0             
+[64] httr_1.4.7                  matrixStats_1.5.0           igraph_2.1.4               
+[67] pwr_1.3-0                   GenomicRanges_1.56.2        IRanges_2.38.1             
+[70] viridisLite_0.4.2           rlang_1.1.4                 glue_1.8.0                 
+[73] BiocGenerics_0.50.0         rstudioapi_0.17.1           jsonlite_1.9.0             
+[76] R6_2.6.1                    MatrixGenerics_1.16.0       zlibbioc_1.50.0            
 
