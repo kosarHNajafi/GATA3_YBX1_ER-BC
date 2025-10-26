@@ -1,0 +1,161 @@
+---
+title: "Spearman correlation between Regact and PDS"
+author: "Kosar"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+###1. Calculate the correlation
+```{r Load required libraries}
+library(dplyr)
+library(tidyr)
+library(openxlsx)
+```
+```{r}
+pathway_names <- c(
+  "Glycosylphosphatidylinositol (GPI) anchor biosynthesis" = "GPI anchor biosynthesis",
+  "Fatty acids oxidation  mitochondrial" = "Fatty acids oxidation (mitochondrial)",
+  "Fatty acids oxidation  peroxisomal" = "Fatty acids oxidation (peroxisomal)",
+  "Ethanol metabolism" = "Ethanol metabolism",
+  "Methionine metabolism" = "Methionine metabolism",
+  "DNA demethylation" = "DNA demethylation",
+  "Valine leucine and isoleucine metabolism" = "Valine, leucine and isoleucine metabolism",
+  "Sugar  degradation" = "Sugar degradation",
+  "Transport  (golgi apparatus)" = "Transport (golgi apparatus)",
+  "Glycogen  degradation" = "Glycogen degradation",
+  "Transport  (extracellular)" = "Transport (extracellular)",
+  "Transport  (lysosomal)" = "Transport (lysosomal)",
+  "Transport  (mitochondrial)" = "Transport (mitochondrial)",
+  "Glycine  serine and threonine metabolism" = "Glycine serine and threonine metabolism"
+)
+
+# Define the function
+convert_pathway_names <- function(df, mapping) {
+  new_names <- colnames(df)
+  matched <- new_names %in% names(mapping)
+  new_names[matched] <- mapping[new_names[matched]]
+  colnames(df) <- new_names
+  return(df)
+}
+
+```
+
+
+```{r Function to Process BC samples with FDR adjustment}
+process_data <- function(df) {
+  
+  # Initialize list for correlation results
+  results <- list()
+  
+  # Loop over TF columns (assumed columns 2:6) and metabolic pathways (columns 7:96)
+  for (gene_col in 2:6) {
+    gene_name <- colnames(df)[gene_col]
+    for (pathway_col in 7:96) {
+      pathway_name <- colnames(df)[pathway_col]
+      
+      # Compute spearman correlation test
+      test_val <- cor.test(df[[gene_col]], 
+                           df[[pathway_col]],
+                           method = "spearman",
+                           exact = FALSE)
+      
+      # Save result as a data frame
+      res_row <- data.frame(
+        Pathway = pathway_name,
+        TF      = gene_name,
+        Cor     = test_val$estimate,
+        P_value = test_val$p.value,
+        stringsAsFactors = FALSE
+      )
+      results[[paste0(pathway_name, "_", gene_name)]] <- res_row
+    }
+  }
+  
+  # Combine into a long-format data frame
+  results_df <- bind_rows(results)
+  
+  # Adjust p-values per TF using Benjamini-Hochberg FDR
+  results_df <- results_df %>%
+    group_by(TF) %>%
+    mutate(P_adj = p.adjust(P_value, method = "BH")) %>%
+    ungroup()
+  
+  # Pivot to wide format (one row per pathway)
+  results_wide <- results_df %>%
+    pivot_wider(
+      names_from   = TF, 
+      values_from  = c(Cor, P_value, P_adj),
+      names_sep    = "_"
+    ) %>%
+    arrange(Pathway)
+# Reorder columns: group Cor, P_value, P_adj for each TF
+tf_names <- unique(results_df$TF)
+ordered_columns <- c("Pathway")  # Start with the Pathway column
+
+for (tf in tf_names) {
+  ordered_columns <- c(
+    ordered_columns,
+    paste0("Cor_", tf),
+    paste0("P_value_", tf),
+    paste0("P_adj_", tf)
+  )
+}
+
+# Reorder the dataframe
+results_wide <- results_wide[, ordered_columns]
+
+  return(results_wide)
+}
+
+```
+
+```{r Process Discovery Data, warning=FALSE}
+df_disc <- read.delim("Disc.Regact.PDS.txt", 
+                      check.names = FALSE,row.names = 1, header = TRUE)
+df_disc <- convert_pathway_names(df_disc,pathway_names)
+results_disc_wide <- process_data(df_disc)
+head(results_disc_wide)
+
+```
+
+```{r Process Validation Data, warning=FALSE}
+df_valid <- read.delim("Valid.Regact.PDS.txt", 
+                       check.names = FALSE, row.names = 1, header = TRUE)
+df_valid <- convert_pathway_names(df_valid,pathway_names)
+results_valid_wide <- process_data(df_valid)
+head(results_valid_wide)
+```
+
+```{r Export Results to Excel}
+
+# Create an Excel file with multiple sheets
+wb <- createWorkbook()
+
+# Add the processed data for each dataset into separate sheets
+# Discovery Data
+addWorksheet(wb, "Disc.BC.Samples")
+writeData(wb, "Disc.BC.Samples", results_disc_wide)
+
+# Validation Data
+addWorksheet(wb, "Valid.BC.Samples")
+writeData(wb, "Valid.BC.Samples", results_valid_wide)
+
+# Save the workbook
+saveWorkbook(wb, file = paste0("1-BC_Regact_Corr_PDS_", Sys.Date(), ".xlsx"), overwrite = TRUE)
+
+# Print confirmation message
+print("Processing complete. Excel file saved.")
+
+```
+
+```{r SessionInfo}
+sessionInfo()
+```
+
+```{r save session}
+save(list = ls(), file = paste0("1-BC_Regact_Corr_PDS_",Sys.Date(),".RData"))
+```
+
