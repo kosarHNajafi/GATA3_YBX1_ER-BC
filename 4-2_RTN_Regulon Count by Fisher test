@@ -3,8 +3,8 @@
 library(stats)
 
 # Load data
-load("~/NCA.ER/NCA.METABRIC/NCA.Disc.All.Genes/NCA.Disc.All.Gene.Rproject/Disc.allgenes.Regulon.NA.RData")
-pathway <- read.delim("C:/NCA.ER/NCA.METABRIC/NCA.Disc.All.Genes/Disc.Counts/Pathway_Counts_PathwaySheet.txt", header = TRUE)
+load("Output From 4-1_RTN")
+pathway <- read.delim("Pathway_Counts_PathwaySheet.txt", header = TRUE)
 
 # Inspect data structure
 str(regulon.NA)
