@@ -1,0 +1,433 @@
+###1. Calculate the correlation
+
+```{r Load required libraries}
+library(dplyr)
+library(tidyr)
+library(openxlsx)
+library(ggplot2)
+library(patchwork)  # for arranging multiple plots
+library(ggtext)     # to allow HTML formatting in legend and axis text
+library(grid)       # for grid.text
+```
+```{r}
+pathway_names <- c(
+  "Glycosylphosphatidylinositol (GPI) anchor biosynthesis" = "GPI anchor biosynthesis",
+  "Fatty acids oxidation  mitochondrial" = "Fatty acids oxidation (mitochondrial)",
+  "Fatty acids oxidation  peroxisomal" = "Fatty acids oxidation (peroxisomal)",
+  "Ethanol metabolism" = "Ethanol metabolism",
+  "Methionine metabolism" = "Methionine metabolism",
+  "DNA demethylation" = "DNA demethylation",
+  "Valine leucine and isoleucine metabolism" = "Valine, leucine and isoleucine metabolism",
+  "Sugar  degradation" = "Sugar degradation",
+  "Transport  (golgi apparatus)" = "Transport (golgi apparatus)",
+  "Glycogen  degradation" = "Glycogen degradation",
+  "Transport  (extracellular)" = "Transport (extracellular)",
+  "Transport  (lysosomal)" = "Transport (lysosomal)",
+  "Transport  (mitochondrial)" = "Transport (mitochondrial)",
+  "Glycine  serine and threonine metabolism" = "Glycine serine and threonine metabolism"
+)
+
+# Define the function
+convert_pathway_names <- function(df, mapping) {
+  new_names <- colnames(df)
+  matched <- new_names %in% names(mapping)
+  new_names[matched] <- mapping[new_names[matched]]
+  colnames(df) <- new_names
+  return(df)
+}
+
+```
+
+
+```{r Function to Process BC samples with FDR adjustment}
+process_data <- function(df) {
+  
+  # Initialize list for correlation results
+  results <- list()
+  
+  # Loop over TF columns (assumed columns 2:6) and metabolic pathways (columns 7:96)
+  for (gene_col in 2:6) {
+    gene_name <- colnames(df)[gene_col]
+    for (pathway_col in 7:96) {
+      pathway_name <- colnames(df)[pathway_col]
+      
+      # Compute spearman correlation test
+      test_val <- cor.test(df[[gene_col]], 
+                           df[[pathway_col]],
+                           method = "spearman",
+                           exact = FALSE)
+      
+      # Save result as a data frame
+      res_row <- data.frame(
+        Pathway = pathway_name,
+        TF      = gene_name,
+        Cor     = test_val$estimate,
+        P_value = test_val$p.value,
+        stringsAsFactors = FALSE
+      )
+      results[[paste0(pathway_name, "_", gene_name)]] <- res_row
+    }
+  }
+  
+  # Combine into a long-format data frame
+  results_df <- bind_rows(results)
+  
+  # Adjust p-values per TF using Benjamini-Hochberg FDR
+  results_df <- results_df %>%
+    group_by(TF) %>%
+    mutate(P_adj = p.adjust(P_value, method = "BH")) %>%
+    ungroup()
+  
+  # Pivot to wide format (one row per pathway)
+  results_wide <- results_df %>%
+    pivot_wider(
+      names_from   = TF, 
+      values_from  = c(Cor, P_value, P_adj),
+      names_sep    = "_"
+    ) %>%
+    arrange(Pathway)
+# Reorder columns: group Cor, P_value, P_adj for each TF
+tf_names <- unique(results_df$TF)
+ordered_columns <- c("Pathway")  # Start with the Pathway column
+
+for (tf in tf_names) {
+  ordered_columns <- c(
+    ordered_columns,
+    paste0("Cor_", tf),
+    paste0("P_value_", tf),
+    paste0("P_adj_", tf)
+  )
+}
+
+# Reorder the dataframe
+results_wide <- results_wide[, ordered_columns]
+
+  return(results_wide)
+}
+
+```
+
+```{r Process Discovery Data, warning=FALSE}
+df_disc <- read.delim("Disc.Regact.PDS.txt", 
+                      check.names = FALSE,row.names = 1, header = TRUE)
+df_disc <- convert_pathway_names(df_disc,pathway_names)
+results_disc_wide <- process_data(df_disc)
+head(results_disc_wide)
+
+```
+
+```{r Process Validation Data, warning=FALSE}
+df_valid <- read.delim("Valid.Regact.PDS.txt", 
+                       check.names = FALSE, row.names = 1, header = TRUE)
+df_valid <- convert_pathway_names(df_valid,pathway_names)
+results_valid_wide <- process_data(df_valid)
+head(results_valid_wide)
+```
+
+```{r Export Results to Excel}
+
+# Create an Excel file with multiple sheets
+wb <- createWorkbook()
+
+# Add the processed data for each dataset into separate sheets
+# Discovery Data
+addWorksheet(wb, "Disc.BC.Samples")
+writeData(wb, "Disc.BC.Samples", results_disc_wide)
+
+# Validation Data
+addWorksheet(wb, "Valid.BC.Samples")
+writeData(wb, "Valid.BC.Samples", results_valid_wide)
+
+# Save the workbook
+saveWorkbook(wb, file = paste0("1-BC_Regact_Corr_PDS_", Sys.Date(), ".xlsx"), overwrite = TRUE)
+
+# Print confirmation message
+print("Processing complete. Excel file saved.")
+
+```
+
+### 2.Find Common correlations with the same trends
+```{r Helper Function for Filtering (FDR < 0.05)}
+filter_data <- function(wide_data, TF) {
+  wide_data %>%
+    filter(as.numeric(get(paste0("P_adj_", TF))) < 0.05) %>%
+    select(
+      Pathway,
+      starts_with(paste0("Cor_", TF)),
+      starts_with(paste0("P_value_", TF)),
+      starts_with(paste0("P_adj_", TF))
+    )
+}
+
+```
+
+```{r Function to Merge Data}
+filter_and_merge <- function(disc_wide, valid_wide, TF) {
+  # Filter both discovery and validation datasets using the helper function
+  disc_filtered <- filter_data(disc_wide, TF)
+  valid_filtered <- filter_data(valid_wide, TF)
+  
+  # Find common pathways
+  common <- inner_join(
+    disc_filtered, valid_filtered,
+    by     = "Pathway",
+    suffix = c("_D", "_V")
+  )
+  
+  # Sort by discovery correlation (ascending)
+  final <- common %>%
+    arrange(as.numeric(get(paste0("Cor_", TF, "_D"))))
+  
+  # Rename columns for clarity
+  final <- final %>% rename(
+    Cor_D     = paste0("Cor_", TF, "_D"),
+    P_value_D = paste0("P_value_", TF, "_D"),
+    P_adj_D   = paste0("P_adj_", TF, "_D"),
+    Cor_V     = paste0("Cor_", TF, "_V"),
+    P_value_V = paste0("P_value_", TF, "_V"),
+    P_adj_V   = paste0("P_adj_", TF, "_V")
+  )
+  
+  return(final)
+}
+
+```
+
+```{r Process Data and Export Results}
+TF_list <- c("GATA3", "ESR1", "YBX1", "CBX2")
+
+wb <- createWorkbook()
+
+# Process for all BC samples for each TF in the list
+
+for (TF in TF_list) {
+  final_combined <- filter_and_merge(results_disc_wide, results_valid_wide, TF)
+  
+  write.table(final_combined, paste0(TF, "_BC_FDR.txt"), sep = "\t", row.names = FALSE, quote = FALSE)
+
+  addWorksheet(wb, paste0(TF, "_BC"))
+  writeData(wb, paste0(TF, "_BC"), final_combined)
+}
+ 
+  
+saveWorkbook(
+  wb,
+  file = paste0("2-Common_Regact_COR_TF_BC_", Sys.Date(), ".xlsx"),
+  overwrite = TRUE
+)
+
+# Print confirmation message
+print("Processing complete. Excel file with FDR-adjusted results saved.")
+
+```
+
+###3. Process for triangle bar plot
+```{r  Helper function to pick correlation}
+pick_larger_pval <- function(corD, pD, corV, pV, alpha = 0.05) {
+  # Decide which correlation to keep based on significance & p-value.
+  dSig <- (pD < alpha)
+  vSig <- (pV < alpha)
+  
+  if (dSig && vSig) {
+    # Both are significant; pick the one with the larger p-value.
+    if (pD > pV) {
+      return(c(corD, pD))
+    } else {
+      return(c(corV, pV))
+    }
+  } else if (dSig && !vSig) {
+    return(c(corD, pD))
+  } else if (!dSig && vSig) {
+    return(c(corV, pV))
+  } else {
+    return(c(NA, NA))
+  }
+}
+
+# List TFs only
+tf_names <- c("GATA3", "ESR1", "CBX2", "YBX1")
+
+# Initialize list
+all_data_list <- list()
+
+# Loop over TFs
+for (tf in tf_names) {
+  
+  # Read combined FDR-filtered correlation file per TF (all BC samples)
+  fileName <- paste0(tf, "_BC_FDR.txt")  # Assumes these are pre-merged
+  df <- read.table(fileName, header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+  
+  # Filter based on FDR < 0.05 (already adjusted)
+  df <- df %>% filter(P_adj_D < 0.05 & P_adj_V < 0.05)
+  
+  # Choose final correlation and p-value: keep the one with higher p-value among significant ones
+  df$Cor_final  <- NA
+  df$Pval_final <- NA
+  
+  for (j in seq_len(nrow(df))) {
+    out <- pick_larger_pval(
+      corD = df$Cor_D[j],
+      pD   = df$P_value_D[j],
+      corV = df$Cor_V[j],
+      pV   = df$P_value_V[j]
+    )
+    df$Cor_final[j]  <- as.numeric(out[1])
+    df$Pval_final[j] <- as.numeric(out[2])
+  }
+  
+  # Final tidy frame
+  df_final <- df %>%
+    select(Pathway, Cor_final) %>%
+    mutate(TF = tf)
+  
+  all_data_list[[tf]] <- df_final
+}
+
+# Combine all TFs
+all_data <- bind_rows(all_data_list)
+```
+```{r Prepare data for bar plots}
+
+# (A) Top bar plot data: For each (Pathway, TF), sum the absolute correlations.
+top_data <- all_data %>%
+  group_by(Pathway, TF) %>%
+  summarize(AbsCor = sum(abs(Cor_final), na.rm = TRUE), .groups = "drop")
+
+# (B) Side bar plot data: Count the number of pathways for each TF.
+side_data <- all_data %>%
+  group_by(TF) %>%
+  summarize(nPath = n(), .groups = "drop")
+```
+```{r Factor ordering for meaningful layout}
+pathway_order <- sort(unique(all_data$Pathway))
+all_data$Pathway <- factor(all_data$Pathway, levels = pathway_order)
+
+# Define the custom order for TFs (GATA3, ESR1, YBX1, CBX2)
+custom_tf_order <- c("CBX2", "YBX1", "ESR1","GATA3")
+
+# Apply this custom order to the TF column in all_data and top_data
+all_data$TF <- factor(all_data$TF, levels = custom_tf_order)
+top_data$TF <- factor(top_data$TF, levels = custom_tf_order)
+
+# Convert character variables to factors with defined ordering.
+all_data$Pathway <- factor(all_data$Pathway, levels = pathway_order)
+top_data$Pathway <- factor(top_data$Pathway, levels = pathway_order)
+side_data$TF     <- factor(side_data$TF, levels = custom_tf_order)
+```
+```{r Define TF colors and HTML legend labels}
+
+tf_colors <- c("GATA3"  = "steelblue1",
+               "ESR1"   = "steelblue1",
+               "CBX2"   = "indianred3",
+               "YBX1"   = "indianred3" )
+
+
+# HTML-colored legend labels for TFs.
+tf_labels_legend <- c(
+  "GATA3"  = "<span style='color:steelblue1'>GATA3</span>",
+  "ESR1"   = "<span style='color:steelblue1'>ESR1</span>",
+  "CBX2"   = "<span style='color:indianred3'>CBX2</span>",
+  "YBX1"   = "<span style='color:indianred3'>YBX1</span>"
+)
+```
+Main matrix plot (Triangles) with grid background and adjusted clipping
+```{r }
+# Create a sign indicator for triangle shape
+all_data <- all_data %>%
+  mutate(Sign = ifelse(Cor_final >= 0, "Positive", "Negative"))
+
+# Filter to retain only rows with abs(Cor_final) > 0.5
+all_data <- all_data %>% filter(abs(Cor_final) > 0.5)
+
+summary(abs(all_data$Cor_final)) # or breaks in scale-size-area
+```
+```{R Render the plot, width = 37, height = 17 }
+
+pdf(paste0("3-TFs Regact and PDS COR(FDR)_", Sys.Date(), ".pdf"), width = 37, height = 17)
+
+# Now create the main plot again with colored y-axis labels
+# Now create the main plot again with colored y-axis labels
+myplot <- ggplot(all_data, aes(x = Pathway, y = TF)) +
+  geom_point(aes(fill = TF, shape = Sign,
+                 size = abs(Cor_final)),
+                 color = "#3E3E3E") +
+  scale_shape_manual(values = c("Positive" = 24, "Negative" = 25),
+  # Set the fill color to #3E3E3E for both Positive and Negative
+                     breaks = c("Positive", "Negative")) +  # This enforces order in the legend
+  scale_fill_manual(values = tf_colors, labels = tf_labels_legend, guide = "none") +
+  scale_size_area(name = "Correlation",
+                  breaks = c(0.5, 0.55,0.7),
+                  max_size = 10,
+                  guide = guide_legend(
+                    title = "Correlation", 
+                    keyheight = unit(4, "lines"),
+                    keywidth = unit(2, "lines")
+                  )) + 
+  #expand = c(0,0) hugs the plot column vise
+  scale_x_discrete( expand = expansion(add = 0.7)) + 
+  theme_minimal(base_size = 20) +
+  scale_y_discrete(
+    expand = expansion(add = 0.5), # only expand rowvise
+    #c(0, 0) hugs the plot rowvise 
+    labels = function(x) {
+      # Apply color to TF names in y-axis
+      sapply(x, function(tf) {
+        paste0("<span style='color:", tf_colors[tf], "'>", tf, "</span>")
+      })
+    }
+  ) +
+  theme(
+    panel.grid.major = element_line(color = "grey90"),
+    panel.grid.minor = element_blank(),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    axis.title = element_blank(),
+    #margin(top, right, bottom, left)
+    panel.border = element_rect(color = "grey", fill = NA, linewidth = 1 ),
+    plot.margin = margin(10, 10, 10, 30),
+    axis.text.y = element_markdown(size = 18,
+                                   face= "bold",
+                                   margin = margin(r = 18)),  # Apply markdown formatting to y-axis labels
+    axis.text.x = element_text(angle = 90,
+                               vjust = 0,hjust = 1,
+                               size = 20 ,
+                               margin = margin(t = 20)),  # Adjust x-axis labels (angle and size)
+    axis.title.x = element_text(vjust = 0, size = 40),  # Adjust the position of the x-axis title without moving the plot
+    legend.title = element_markdown(size = 25),
+    legend.text = element_markdown(size = 24),  # Increase text size in legend
+    legend.justification = c(0, 0.5),  # Adjust the position of the legend
+    legend.margin = margin(r = 10,l = 9),  # Optional: add a bit of space to the left of the legend if needed
+    legend.spacing = unit(1.5, "lines"),  # Add space between legend items 
+    aspect.ratio = 1/8  # Space/gap between TF rows/y-axis
+  ) +
+  coord_cartesian(clip = "off") +  # So that it does not clip the top and bottom of the plot
+  labs(size = "Correlation", 
+       shape = "Correlation Direction",
+       x = "Correlation between regulon activity and metabolic pathways deregulation score") +
+  guides(
+    shape = guide_legend(
+      keyheight = unit(3, "lines"),    # Increase vertical space for each key
+      keywidth  = unit(3, "lines"),    # Increase horizontal space for each key
+      override.aes = list(size = 10)   # Increase the triangle (shape) size
+    ),
+    size = guide_legend(
+      title = "Correlation",
+      override.aes = list(shape = 24),  # Adjust size and set to triangle
+      keyheight = unit(3, "lines"),    # Increase vertical space for each key
+      order = 1
+    )
+  )
+
+print(myplot)
+
+# Add the text to the side in pdf only
+grid.text("FDR < 0.05", x = 0.9315, y = 0.535,
+          rot = 0,
+          gp = gpar(fontsize = 25))
+
+grid.text("|Correlation| > 0.5", x = 0.932, y = 0.5,
+          rot = 0,
+          gp = gpar(fontsize = 25))
+
+dev.off()
+
