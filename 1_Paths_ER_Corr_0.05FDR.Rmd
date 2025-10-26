@@ -1,0 +1,270 @@
+---
+title: "1_Paths_ER_Corr_0.05FDR"
+author: "Kosar"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## correlation analysis of pathways in discovery and validation datasets within distinct ER status groups
+
+# Load libraries
+```{r libraries}
+library(Hmisc)     # for rcorr
+library(tidyverse) # for dplyr and tidy operations
+library(stats)     # for p.adjust
+library(dplyr)
+library(tibble)
+library(openxlsx)
+library(reshape2)
+library(pheatmap)
+library(grid)  #for grid.text function in heatmap
+```
+
+```{r Polish pathway names}
+pathway_names <- c(
+  "Glycosylphosphatidylinositol (GPI) anchor biosynthesis" = "GPI anchor biosynthesis",
+  "Fatty acids oxidation  mitochondrial" = "Fatty acids oxidation (mitochondrial)",
+  "Fatty acids oxidation  peroxisomal" = "Fatty acids oxidation (peroxisomal)",
+  "Ethanol metabolism" = "Ethanol metabolism",
+  "Methionine metabolism" = "Methionine metabolism",
+  "DNA demethylation" = "DNA demethylation",
+  "Valine leucine and isoleucine metabolism" = "Valine, leucine and isoleucine metabolism",
+  "Sugar  degradation" = "Sugar degradation",
+  "Transport  (golgi apparatus)" = "Transport (golgi apparatus)",
+  "Glycogen  degradation" = "Glycogen degradation",
+  "Transport  (extracellular)" = "Transport (extracellular)",
+  "Transport  (lysosomal)" = "Transport (lysosomal)",
+  "Transport  (mitochondrial)" = "Transport (mitochondrial)",
+  "Glycine  serine and threonine metabolism" = "Glycine serine and threonine metabolism"
+)
+
+# Define the function
+convert_pathway_names <- function(df, mapping) {
+  new_names <- colnames(df)
+  matched <- new_names %in% names(mapping)
+  new_names[matched] <- mapping[new_names[matched]]
+  colnames(df) <- new_names
+  return(df)
+}
+
+```
+
+## Calculate the *Pearson* correlation,P-value, and FDR of pathways
+```{r setup a function}
+# --- Main Function ---
+analyze_correlations <- function(data_disc, data_valid, er_status, prefix ) {
+  
+  # Filter by ER status
+  disc_sub <- subset(data_disc, data_disc$`ER status` == er_status) %>% 
+    select(-c(`ER status`, `Her2 status`, `PR status`)) %>% as.matrix()
+  valid_sub <- subset(data_valid, data_valid$`ER status` == er_status) %>% 
+    select(-c(`ER status`, `Her2 status`, `PR status`)) %>% as.matrix()
+  
+  # Pearson correlations
+  disc.cor <- rcorr(disc_sub, type = "pearson")
+  valid.cor <- rcorr(valid_sub, type = "pearson")
+  
+    # FDR correction
+  disc.fdr <- matrix(p.adjust(disc.cor$P, method = "fdr"), nrow = nrow(disc.cor$P),dimnames = list(rownames(disc.cor$P), colnames(disc.cor$P)))
+  
+  valid.fdr <- matrix(p.adjust(valid.cor$P, method = "fdr"), nrow = nrow(valid.cor$P),dimnames = list(rownames(valid.cor$P), colnames(valid.cor$P)))
+  
+  #--- A. DISCOVERY-ONLY significant pairs (FDR < 0.05) ---
+  disc_sig_indices <- which(
+  disc.fdr < 0.05 & 
+  upper.tri(disc.fdr) & 
+  (disc.cor$r < -0.1 | disc.cor$r > 0.1),
+  arr.ind = TRUE
+)
+
+  disc_only_summary <- data.frame(
+    Pathway1 = rownames(disc.fdr)[disc_sig_indices[, 1]],
+    Pathway2 = colnames(disc.fdr)[disc_sig_indices[, 2]],
+    Corr = mapply(function(i, j) round(disc.cor$r[i, j], 3),
+                  rownames(disc.fdr)[disc_sig_indices[, 1]],
+                  colnames(disc.fdr)[disc_sig_indices[, 2]]),
+    Pval = mapply(function(i, j) round(disc.cor$P[i, j], 5),
+                  rownames(disc.fdr)[disc_sig_indices[, 1]],
+                  colnames(disc.fdr)[disc_sig_indices[, 2]]),
+    FDR = mapply(function(i, j) round(disc.fdr[i, j], 5),
+                 rownames(disc.fdr)[disc_sig_indices[, 1]],
+                 colnames(disc.fdr)[disc_sig_indices[, 2]]),
+    stringsAsFactors = FALSE
+  )
+
+  #--- B. VALIDATION-ONLY significant pairs (FDR < 0.05) ---
+  valid_sig_indices <- which(
+  valid.fdr < 0.05 & 
+  upper.tri(valid.fdr) & 
+  (valid.cor$r < -0.1 | valid.cor$r > 0.1),
+  arr.ind = TRUE
+)
+
+  valid_only_summary <- data.frame(
+    Pathway1 = rownames(valid.fdr)[valid_sig_indices[, 1]],
+    Pathway2 = colnames(valid.fdr)[valid_sig_indices[, 2]],
+    Corr = mapply(function(i, j) round(valid.cor$r[i, j], 3),
+                  rownames(valid.fdr)[valid_sig_indices[, 1]],
+                  colnames(valid.fdr)[valid_sig_indices[, 2]]),
+    Pval = mapply(function(i, j) round(valid.cor$P[i, j], 5),
+                  rownames(valid.fdr)[valid_sig_indices[, 1]],
+                  colnames(valid.fdr)[valid_sig_indices[, 2]]),
+    FDR = mapply(function(i, j) round(valid.fdr[i, j], 5),
+                 rownames(valid.fdr)[valid_sig_indices[, 1]],
+                 colnames(valid.fdr)[valid_sig_indices[, 2]]),
+    stringsAsFactors = FALSE
+  )
+
+  #--- C. Reproducible significant pairs across discovery & validation ---
+  common_paths <- rownames(disc.cor$r)
+  selected_pairs <- list()
+  
+  for (i in 1:(length(common_paths) - 1)) {
+    for (j in (i + 1):length(common_paths)) {
+      path1 <- common_paths[i]
+      path2 <- common_paths[j]
+      
+      r1 <- disc.cor$r[path1, path2]
+      r2 <- valid.cor$r[path1, path2]
+      fdr1 <- disc.fdr[path1, path2]
+      fdr2 <- valid.fdr[path1, path2]
+      
+      if ((r1 >= 0.1 & r2 >= 0.1 | r1 <= -0.1 & r2 <= -0.1) & fdr1 < 0.05 & fdr2 < 0.05) {
+        selected_pairs[[length(selected_pairs) + 1]] <- c(path1, path2)
+      }
+    }
+  }
+  
+  selected_paths <- unique(unlist(selected_pairs))
+  filtered_r_disc <- disc.cor$r[selected_paths, selected_paths]
+  filtered_r_valid <- valid.cor$r[selected_paths, selected_paths]
+  filtered_p_disc <- disc.cor$P[selected_paths, selected_paths]
+  filtered_p_valid <- valid.cor$P[selected_paths, selected_paths]
+  filtered_fdr_disc <- disc.fdr[selected_paths, selected_paths]
+  filtered_fdr_valid <- valid.fdr[selected_paths, selected_paths]
+  
+  # --- Heatmap plotting ---
+  my_palette <- colorRampPalette(c("skyblue", "white", "tomato"))(50)
+  my_breaks <- seq(-1, 1, length.out = 51)
+  
+  pdf(paste0("1_","Common(Trend)_", prefix, "_Paths_corr_", Sys.Date(), ".pdf"), width = 8, height = 8)
+  
+  pheatmap(filtered_r_disc,
+           color = my_palette,
+           breaks = my_breaks,
+           main = paste0("Correlations of Reproduced Pathways in ER-", er_status, " samples"),
+           fontsize = 6,
+           border_color = NA,
+           clustering_distance_rows = "correlation",
+           clustering_distance_cols = "correlation")
+  grid.text("FDR < 0.05", x = 0.97, y = 0.6 , rot = 0, gp = gpar(fontsize = 6))
+  grid.text("Discovery", x = 0.93, y = 0.03, rot = 0, gp = gpar(fontsize = 12))
+  
+  pheatmap(filtered_r_valid,
+           color = my_palette,
+           breaks = my_breaks,
+           main = paste0("Correlations of Reproduced Pathways in ER-", er_status, " samples"),
+           fontsize = 6,
+           border_color = NA,
+           clustering_distance_rows = "correlation",
+           clustering_distance_cols = "correlation")
+  grid.text("FDR <0.05", x = 0.97, y = 0.6 , rot = 0, gp = gpar(fontsize = 6))
+  grid.text("Validation", x = 0.93, y = 0.03 , rot = 0, gp = gpar(fontsize = 12))
+  
+  dev.off()
+  
+  # --- Summary table for replicated correlations --- 
+    cor_summary_list <- lapply(selected_pairs, function(pair) {
+    p1 <- pair[1]
+    p2 <- pair[2]
+    
+    tibble(
+      Pathway1 = p1,
+      Pathway2 = p2,
+      Cor_DISC = round(disc.cor$r[p1, p2], 3),
+      Pval_DISC = round(disc.cor$P[p1, p2], 5),
+      FDR_DISC = round(disc.fdr[p1, p2], 5),
+      Cor_VALID = round(valid.cor$r[p1, p2], 3),
+      Pval_VALID = round(valid.cor$P[p1, p2], 5),
+      FDR_VALID = round(valid.fdr[p1, p2], 5),
+      Trend = ifelse(disc.cor$r[p1, p2] > 0 & valid.cor$r[p1, p2] > 0, "Positive",
+                     ifelse(disc.cor$r[p1, p2] < 0 & valid.cor$r[p1, p2] < 0, "Negative", "Mixed"))
+    )
+  })
+  
+  cor_summary <- bind_rows(cor_summary_list)
+  
+  # --- Melt all correlations ---
+  r_disc_melt <- melt(disc.cor$r, varnames = c("Pathway1", "Pathway2"), value.name = "Cor_DISC")
+  p_disc_melt <- melt(disc.cor$P, varnames = c("Pathway1", "Pathway2"), value.name = "Pval_DISC")
+  fdr_disc_melt <- melt(disc.fdr, varnames = c("Pathway1", "Pathway2"), value.name = "FDR_DISC")
+  
+  r_valid_melt <- melt(valid.cor$r, varnames = c("Pathway1", "Pathway2"), value.name = "Cor_VALID")
+  p_valid_melt <- melt(valid.cor$P, varnames = c("Pathway1", "Pathway2"), value.name = "Pval_VALID")
+  fdr_valid_melt <- melt(valid.fdr, varnames = c("Pathway1", "Pathway2"), value.name = "FDR_VALID")
+  
+  all_corrs <- r_disc_melt %>%
+    left_join(p_disc_melt, by = c("Pathway1", "Pathway2")) %>%
+    left_join(fdr_disc_melt, by = c("Pathway1", "Pathway2")) %>%
+    left_join(r_valid_melt, by = c("Pathway1", "Pathway2")) %>%
+    left_join(p_valid_melt, by = c("Pathway1", "Pathway2")) %>%
+    left_join(fdr_valid_melt, by = c("Pathway1", "Pathway2"))
+  
+  # --- Save everything ---
+  cor_results_list <- list(
+    DISC_ONLY = disc_only_summary,
+    VALID_ONLY = valid_only_summary,
+    COMMON = cor_summary,
+    ALL = all_corrs
+  )
+  
+  write.xlsx(cor_results_list, file = paste0("1_",prefix, "_Paths_corr_", Sys.Date(), ".xlsx"))
+  
+  return(cor_results_list)
+}
+
+```
+# Read discovery dataset and format
+```{r}
+disc <- read.delim("Disc.90PDS.txt", check.names = FALSE, row.names = 1)
+disc <- convert_pathway_names(df = disc,mapping = pathway_names)
+disc <- disc[order(rownames(disc)), order(colnames(disc))]
+disc <- disc %>% select(c(`ER status`, `Her2 status`, `PR status`), everything())
+head(disc)
+```
+
+# Read validation dataset and format
+```{r}
+valid <- read.delim("Valid.90PDS.txt", check.names = FALSE, row.names = 1)
+valid <- convert_pathway_names(df = valid,mapping = pathway_names)
+valid <- valid[order(rownames(valid)), order(colnames(valid))]
+valid <- valid %>% select(c(`ER status`, `Her2 status`, `PR status`), everything())
+head(valid)
+```
+
+# Run the analysis for ER negative status
+## ⚠️er_status = "Positive" or "Negative, prefix = "ERpos" or "ERneg"
+## ⚠️For heatmap already Discovery and Validation is written inside the function
+```{r}
+# Run for ER-negative
+cor_ERneg <- analyze_correlations(disc, valid, er_status = "Negative", prefix = "ERneg")
+
+# Run for ER-positive
+cor_ERpos <- analyze_correlations(disc, valid, er_status = "Positive", prefix = "ERpos")
+```
+
+
+<details>
+<summary>⚙️session info⚙️</summary>
+
+```{r, echo=FALSE}
+sessionInfo()
+```
+
+```{r}
+save(list = ls(), file = paste0("1_Paths_ER_Corr_0.05FDR_", Sys.Date(), ".RData"))
+```
+
