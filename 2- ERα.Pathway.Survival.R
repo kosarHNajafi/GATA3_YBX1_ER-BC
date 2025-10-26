@@ -14,7 +14,7 @@ library(openxlsx)      # For reading/writing Excel files
 ##############################################################################
 # This file contains survival times, event indicators, and pathway columns.
 survival_data_full <- read.delim(
-  "E:/2.ER/5.Survival Analysis/PDS_KM/10/Disc.ERpos.HR.all.Survival/DISC.ERP.Sur.AllPathways.txt",
+  "Efile path",
   check.names = FALSE
 )
 
@@ -63,10 +63,10 @@ endpoints_full_name <- list(
 ##############################################################################
 # 6) Block 1: Create Survival Plots for All Data (No p-value Filtering)
 ##############################################################################
-# We'll save these plots in a PDF file.
+# These plots will be saved in a PDF file.
 pdf(paste0("disc.ERpos_", Sys.Date(), "_with_5_year_survival.pdf"))
 
-# We assume that columns 11 to 100 in the survival_data_full are "pathway" columns.
+# In this case the columns 11 to 100 in the survival_data_full are "pathway" columns.
 for (col_index in 11:100) {
   
   # Get the pathway name (column header) and its values.
@@ -148,7 +148,7 @@ for (col_index in 11:100) {
       ############################################################################
       # Plot for Regular (Non-5-Year) Analysis
       ############################################################################
-      # We'll use ggsurvplot from survminer. We add a bounding box around the plot
+      # Using ggsurvplot from survminer. Adding a bounding box around the plot
       # by specifying panel.border in the theme. This ensures the entire plot is enclosed.
       plot_regular <- ggsurvplot(
         fit        = surv_fit,
@@ -547,3 +547,4 @@ saveWorkbook(wb_MFS_5yr_sig,paste0("disc.ERpos_MFS_5YEAR_sig_", Sys.Date(), ".xl
 session_info <- sessionInfo()  # Capture session info for reproducibility
 save(list = ls(), file = paste0("Disc.ERpos_", Sys.Date(), ".RData"))
 save.image(paste0("Image.disc.ERpos_", Sys.Date(), ".RData"))
+
