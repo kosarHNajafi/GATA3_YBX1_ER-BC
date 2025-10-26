@@ -1,0 +1,431 @@
+---
+title: "3_Opposite_Paths_ERstatus_Corr_0.05_FDR"
+author: "Kosar"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load libraries
+```{r libraries, message=FALSE, warning=FALSE}
+library(tidyverse) # for dplyr and tidy operations
+library(grid)
+library(ggplot2)
+library(ggtext)
+library(dplyr)
+library(ComplexHeatmap)
+library(circlize)
+```
+
+```{r}
+load("G:/My Drive/2.ER/1.Metabolomics/Metabolic Pathways/90 Metabolic Pathways.Patients/Final-Path-Path-Cor/1_Paths_ER_Corr_0.05FDR_2025-07-11.RData")
+```
+
+```{r}
+filter_opposite_patterns <- function(pos_df, neg_df) {
+  # Create matching key for both
+  pos_df$Pair <- paste(pmin(pos_df$Pathway1, pos_df$Pathway2),
+                       pmax(pos_df$Pathway1, pos_df$Pathway2), sep = "_")
+  neg_df$Pair <- paste(pmin(neg_df$Pathway1, neg_df$Pathway2),
+                       pmax(neg_df$Pathway1, neg_df$Pathway2), sep = "_")
+  
+  # Add consistent cleaned pathway names
+  pos_df$Pathway1_clean <- pmin(pos_df$Pathway1, pos_df$Pathway2)
+  pos_df$Pathway2_clean <- pmax(pos_df$Pathway1, pos_df$Pathway2)
+  neg_df$Pathway1_clean <- pmin(neg_df$Pathway1, neg_df$Pathway2)
+  neg_df$Pathway2_clean <- pmax(neg_df$Pathway1, neg_df$Pathway2)
+
+  # Combine both dataframes using full join
+  merged <- full_join(pos_df, neg_df, by = "Pair", suffix = c("_pos", "_neg"))
+
+  # If pathway names are missing in one side, use the other side’s
+  merged$Pathway1 <- coalesce(merged$Pathway1_clean_pos, merged$Pathway1_clean_neg)
+  merged$Pathway2 <- coalesce(merged$Pathway2_clean_pos, merged$Pathway2_clean_neg)
+
+  # Filter: Keep only cases where both pos and neg are reproducible and trends do not match
+  filtered <- merged %>%
+    filter(!
+             (!is.na(FDR_DISC_pos) & !is.na(FDR_DISC_neg) &
+              FDR_DISC_pos < 0.05 & FDR_VALID_pos < 0.05 &
+              FDR_DISC_neg < 0.05 & FDR_VALID_neg < 0.05 &
+              abs(Cor_DISC_pos) >= 0.1  & 
+              abs(Cor_DISC_neg) >= 0.1  &
+              abs(Cor_VALID_pos) >= 0.1 &
+              abs(Cor_VALID_neg) >= 0.1 &
+              Trend_pos == Trend_neg )
+           )
+
+  # Final cleaned result
+  result <- filtered %>%
+    select(Pathway1, Pathway2,
+           Cor_DISC_pos, Pval_DISC_pos, FDR_DISC_pos,
+           Cor_VALID_pos, Pval_VALID_pos, FDR_VALID_pos, Trend_pos,
+           Cor_DISC_neg, Pval_DISC_neg, FDR_DISC_neg,
+           Cor_VALID_neg, Pval_VALID_neg, FDR_VALID_neg, Trend_neg)
+
+  # Save
+  write.table(result, file = paste0("3_Plot_results_", Sys.Date(), ".txt"),
+              sep = "\t", row.names = FALSE, quote = FALSE)
+
+  return(result)
+}
+
+
+```
+
+Apply the function to find unique patterns
+```{r}
+results_opposite <- filter_opposite_patterns(cor_ERpos$COMMON, cor_ERneg$COMMON)
+```
+
+```{r}
+# === 1. Prepare Data ===
+plot_df <- results_opposite %>%
+  filter(!(Trend_pos == Trend_neg & !is.na(Trend_pos) & !is.na(Trend_neg))) %>%
+  filter(!is.na(Pathway1) & !is.na(Pathway2)) %>%
+  filter(Pathway1 != Pathway2)
+
+# Get sorted list of pathways
+all_pathways <- sort(unique(c(plot_df$Pathway1, plot_df$Pathway2)))
+
+plot_df <- plot_df %>%
+  mutate(
+    Pathway1 = factor(Pathway1, levels = all_pathways),
+    Pathway2 = factor(Pathway2, levels = all_pathways),
+    x = as.numeric(Pathway1),
+    y = as.numeric(Pathway2)
+  )
+```
+
+```{r}
+# === 2. Triangle Maker ===
+make_half_triangle <- function(x_center, y_center, direction = "up", size = 0.7) {
+  if (direction == "up") {
+    tibble(
+      x = c(x_center - size, x_center + size, x_center),
+      y = c(y_center, y_center, y_center + size)
+    )
+  } else if (direction == "down") {
+    tibble(
+      x = c(x_center - size, x_center + size, x_center),
+      y = c(y_center, y_center, y_center - size)
+    )
+  }
+}
+
+# === 3. Build Triangle Data ===
+triangle_list <- list()
+
+for (i in 1:nrow(plot_df)) {
+  row <- plot_df[i, ]
+  
+  # Expand x and y by 2 for spacing
+  x <- row$x * 2
+  y <- row$y * 2
+
+  # ER-positive
+  if (!is.na(row$Trend_pos)) {
+    tri_pos <- make_half_triangle(
+      x, y,
+      direction = ifelse(row$Trend_pos == "Positive", "up", "down"),
+      size = 0.7
+    ) %>%
+      mutate(
+        fill = "steelblue",  # ER-positive = blue
+        group = paste0("pos_", i)
+      )
+    triangle_list[[length(triangle_list) + 1]] <- tri_pos
+  }
+
+  # ER-negative
+  if (!is.na(row$Trend_neg)) {
+    tri_neg <- make_half_triangle(
+      x, y,
+      direction = ifelse(row$Trend_neg == "Positive", "up", "down"),
+      size = 0.7
+    ) %>%
+      mutate(
+        fill = "indianred3",  # ER-negative = red
+        group = paste0("neg_", i)
+      )
+    triangle_list[[length(triangle_list) + 1]] <- tri_neg
+  }
+}
+
+triangles <- bind_rows(triangle_list)
+
+# === 4. Background Tiles ===
+tile_background <- expand.grid(
+  x = seq_along(all_pathways),
+  y = seq_along(all_pathways)
+) %>%
+  filter(x < y) %>%
+  mutate(x = x * 2, y = y * 2)
+
+# Get original centers from plot_df
+centers_df <- plot_df %>%
+  mutate(
+    center_x = x * 2,
+    center_y = y * 2
+  ) %>%
+  filter(!is.na(Trend_pos) & !is.na(Trend_neg)) %>%
+  distinct(center_x, center_y)
+
+# Add background fill based on presence of both triangles
+tile_background <- tile_background %>%
+  mutate(cell_id = paste0(x, "_", y)) %>%
+  mutate(
+    fill = ifelse(paste0(x, "_", y) %in% paste0(centers_df$center_x, "_", centers_df$center_y),
+                  "grey80", "white")
+  )
+
+```
+
+```{r fig.width=12,fig.height=12}
+# === 5. Plot ===
+pdf(paste0("3_Opposite_Paths_corr_FDR_",Sys.Date(),".pdf"), 
+    width = 12, height = 12)
+p <- ggplot() +
+  
+  # White background
+  geom_tile(
+    data = tile_background,
+    aes(x = x, y = y, fill = fill),
+    color = "grey80", width = 2, height = 2
+  ) +
+  
+  # Triangles
+  geom_polygon(
+    data = triangles,
+    aes(x = x, y = y, group = group, fill = fill),
+    alpha = 0.8, # Slight transparency
+    color = NA  # No black border
+  ) +
+  
+  # Axes
+  scale_x_continuous(
+    breaks = seq_along(all_pathways) * 2,
+    labels = all_pathways,
+    expand = expansion(mult = c(0, 0.02)), 
+    #c(left,right) add 2% space on right sides
+    #c(0,0) no gap between x-axis and plot 
+    #expansion(mult = 0.1) if you want a gap between x-axis and plot
+    position = "top"
+  ) +
+  scale_y_continuous(
+    breaks = seq_along(all_pathways) * 2, #more spcae between pathway names
+    labels = all_pathways,
+    expand = expansion(mult = c(0.02, 0)),# add 2% space on downside   
+    #expansion(mult = 0.05) if you want a gap between y-axis and plot
+  ) +
+  
+    # Important: allow different fill scales
+  scale_fill_identity() +
+  
+  coord_fixed() + # keep x and y scales equal
+  
+  theme_minimal(base_size = 10) +
+theme(
+  axis.text.x = element_text(
+    angle = 90, 
+    hjust = 0, 
+    vjust = -1, 
+    size = 7
+    #margin = margin(b = 10)  # <-- reduces top margin
+  ),
+  axis.text.y = element_text(
+    angle = 0, 
+    hjust = 1, 
+    vjust = 0,
+    size = 7
+    #margin = margin(r = 0)  # <-- reduces right margin
+  ),
+  #axis.line = element_line(color = "black", linewidth = 0.5),
+  panel.grid = element_blank(),
+  axis.title = element_blank(),
+  plot.margin = margin(5,5,5,5)  # optional: tightens around whole plot
+) +
+  ggtitle("Opposite trends in correlation of Pathways in ER +ve and ER -ve ") 
+
+# === Full Custom Legend (Bottom Right, clean labels) ===
+
+# 1. Legend anchor
+legend_x <- max(tile_background$x) - 110
+legend_y <- min(tile_background$y) + 30
+
+# 2. Triangle-only legend shapes
+triangle_legend <- bind_rows(
+  make_half_triangle(legend_x, legend_y + 12, "up", size = 2) %>% 
+    mutate(fill = "steelblue", group = "ERpos_Pos", label = "Positive correlation in ER +ve"),
+
+  make_half_triangle(legend_x, legend_y + 10, "down", size = 2) %>% 
+    mutate(fill = "steelblue", group = "ERpos_Neg", label = "Negative correlation in ER +ve"),
+
+  make_half_triangle(legend_x, legend_y + 4, "up", size = 2) %>% 
+    mutate(fill = "indianred3", group = "ERneg_Pos", label = "Positive correlation in ER -ve"),
+
+  make_half_triangle(legend_x, legend_y + 2, "down", size = 2) %>% 
+    mutate(fill = "indianred3", group = "ERneg_Neg", label = "Negative correlation in ER -ve")
+)
+
+triangle_legend_labels <- triangle_legend %>%
+  group_by(group, label) %>%
+  summarise(x = max(x) + 1.2, y = mean(y), .groups = "drop")
+
+# 3. Composite polygons (half-half)
+half_half_polygons <- bind_rows(
+  # ER+ positive (blue) and ER– negative (red)
+  make_half_triangle(legend_x, legend_y - 4, "up", size = 2) %>%
+    mutate(fill = "steelblue", group = "ERpos_up"),
+  make_half_triangle(legend_x, legend_y - 4, "down", size = 2) %>%
+    mutate(fill = "indianred3", group = "ERneg_down"),
+
+  # ER– positive (red) and ER+ negative (blue)
+  make_half_triangle(legend_x, legend_y - 10, "up", size = 2) %>%
+    mutate(fill = "indianred3", group = "ERneg_up"),
+  make_half_triangle(legend_x, legend_y - 10, "down", size = 2) %>%
+    mutate(fill = "steelblue", group = "ERpos_down")
+)
+
+half_half_labels <- tibble(
+  x = legend_x + 3.2,
+  y = c(legend_y - 4, legend_y - 10),
+  label = c(
+    "Positive correlation in ER +ve and negative correlation in ER -ve",
+    "Positive correlation in ER -ve and negative correlation in ER +ve"
+  )
+)
+
+# === Add all legend components ===
+p <- p +
+  geom_polygon(data = triangle_legend, aes(x = x, y = y, group = group, fill = fill), color = NA) +
+  geom_text(data = triangle_legend_labels, aes(x = x, y = y, label = label), hjust = 0, size = 3) +
+
+  geom_polygon(data = half_half_polygons, aes(x = x, y = y, group = group, fill = fill), color = NA) +
+  geom_text(data = half_half_labels, aes(x = x, y = y, label = label), hjust = 0, size = 3) 
+
+print(p)
+
+dev.off()
+
+print(p)
+```
+
+```{r}
+# === 1. Prepare Chord Data ===
+plot_chord_diagram <- function(results_common, trend_col, suffix) {
+  chord_df <- results_common %>%
+    filter(
+      !is.na(.data[[trend_col]]),
+      !is.na(Pathway1), !is.na(Pathway2),
+      Pathway1 != Pathway2,
+      abs(Cor_Selected) > 0.1
+    ) %>%
+    mutate(
+      color = ifelse(Cor_Selected > 0.1, "steelblue", "indianred3")
+    ) %>%
+    select(Pathway1, Pathway2, Cor_Selected, color)
+  
+  ordered_pathways <- sort(unique(c(chord_df$Pathway1, chord_df$Pathway2)))
+
+#-----------------------------
+# Activate the section below for clustered pathway organization
+#------------------------------
+# === 2. Create Symmetric Square Correlation Matrix for Clustering ===
+# Get all unique pathways
+# Initialize square matrix
+#   cor_mat <- matrix(0, nrow = length(all_pathways), ncol =            #length(all_pathways),
+#                    dimnames = list(all_pathways, all_pathways))
+#  
+#  for (i in seq_len(nrow(chord_df))) {
+#    p1 <- chord_df$Pathway1[i]
+#    p2 <- chord_df$Pathway2[i]
+#    val <- chord_df$Cor_Selected[i]
+#    cor_mat[p1, p2] <- val
+#    cor_mat[p2, p1] <- val
+#  }
+
+  #dist_mat <- as.dist(1 - cor_mat)
+  #hc <- hclust(dist_mat, method = "ward.D2")
+  #ordered_pathways <- hc$labels[hc$order]
+#---------Activate the section above for clustered pathway organization---
+
+pdf(paste0("3_", suffix,"_Opposite_paths_chord_", Sys.Date(), ".pdf"),
+    width = 14, height = 14)
+  circos.clear()
+  circos.par(
+    start.degree = 90,
+    gap.after = c(rep(2, length(ordered_pathways) - 1), 2.5),
+    track.margin = c(0.01, 0.01),
+    canvas.xlim = c(-2.05, 2.05),
+    canvas.ylim = c(-2.05, 2.05)
+  )
+
+  chordDiagram(
+    x = chord_df %>% select(Pathway1, Pathway2, value = Cor_Selected),
+    order = ordered_pathways,
+    col = chord_df$color,
+    transparency = 0.2,
+    directional = 0,
+    annotationTrack = "grid",
+    preAllocateTracks = list(track.height = 0.08)
+  )
+
+  circos.trackPlotRegion(
+    track.index = 1,
+    panel.fun = function(x, y) {
+      circos.text(
+        CELL_META$xcenter,
+        CELL_META$ylim[1] + mm_y(3),
+        CELL_META$sector.index,
+        facing = "clockwise",
+        niceFacing = TRUE,
+        adj = c(0, 0.3),
+        cex = 0.7
+      )
+    },
+    bg.border = NA
+  )
+  #plot(hc)  #activate with section 2 and 3
+  dev.off()
+}
+
+```
+
+```{r}
+# ER-positive: choose correlation based on which FDR is smaller
+results_common_pos <- cor_ERpos$COMMON %>%
+  filter(!is.na(Pathway1), !is.na(Pathway2), Pathway1 != Pathway2) %>%
+  mutate(
+    Cor_Selected = ifelse(FDR_DISC < FDR_VALID, Cor_DISC, Cor_VALID)
+  )
+
+# ER-negative: same logic
+results_common_neg <- cor_ERneg$COMMON %>%
+  filter(!is.na(Pathway1), !is.na(Pathway2), Pathway1 != Pathway2) %>%
+  mutate(
+    Cor_Selected = ifelse(FDR_DISC < FDR_VALID, Cor_DISC, Cor_VALID)
+  )
+
+```
+
+```{r}
+plot_chord_diagram(results_common_pos, "Trend", "ERpositive")
+plot_chord_diagram(results_common_neg, "Trend", "ERnegative")
+
+```
+
+<details>
+<summary>⚙️session info⚙️</summary>
+
+```{r, echo=FALSE}
+sessionInfo()
+```
+
+```{r}
+save(list = ls(), file = paste0("3_Opposite_Paths_corr_0.05FDR_", Sys.Date(), ".RData"))
+```
+
