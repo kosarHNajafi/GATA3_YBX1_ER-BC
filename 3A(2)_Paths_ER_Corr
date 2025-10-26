@@ -17,11 +17,10 @@ library(ggplot2)
 library(ggtext)
 library(dplyr)
 library(ComplexHeatmap)
-library(circlize)
 ```
 
 ```{r}
-load("G:/My Drive/2.ER/1.Metabolomics/Metabolic Pathways/90 Metabolic Pathways.Patients/Final-Path-Path-Cor/1_Paths_ER_Corr_0.05FDR_2025-07-11.RData")
+load(data from 3A(1)_Paths_ER_Corr")
 ```
 
 ```{r}
@@ -314,110 +313,6 @@ dev.off()
 print(p)
 ```
 
-```{r}
-# === 1. Prepare Chord Data ===
-plot_chord_diagram <- function(results_common, trend_col, suffix) {
-  chord_df <- results_common %>%
-    filter(
-      !is.na(.data[[trend_col]]),
-      !is.na(Pathway1), !is.na(Pathway2),
-      Pathway1 != Pathway2,
-      abs(Cor_Selected) > 0.1
-    ) %>%
-    mutate(
-      color = ifelse(Cor_Selected > 0.1, "steelblue", "indianred3")
-    ) %>%
-    select(Pathway1, Pathway2, Cor_Selected, color)
-  
-  ordered_pathways <- sort(unique(c(chord_df$Pathway1, chord_df$Pathway2)))
-
-#-----------------------------
-# Activate the section below for clustered pathway organization
-#------------------------------
-# === 2. Create Symmetric Square Correlation Matrix for Clustering ===
-# Get all unique pathways
-# Initialize square matrix
-#   cor_mat <- matrix(0, nrow = length(all_pathways), ncol =            #length(all_pathways),
-#                    dimnames = list(all_pathways, all_pathways))
-#  
-#  for (i in seq_len(nrow(chord_df))) {
-#    p1 <- chord_df$Pathway1[i]
-#    p2 <- chord_df$Pathway2[i]
-#    val <- chord_df$Cor_Selected[i]
-#    cor_mat[p1, p2] <- val
-#    cor_mat[p2, p1] <- val
-#  }
-
-  #dist_mat <- as.dist(1 - cor_mat)
-  #hc <- hclust(dist_mat, method = "ward.D2")
-  #ordered_pathways <- hc$labels[hc$order]
-#---------Activate the section above for clustered pathway organization---
-
-pdf(paste0("3_", suffix,"_Opposite_paths_chord_", Sys.Date(), ".pdf"),
-    width = 14, height = 14)
-  circos.clear()
-  circos.par(
-    start.degree = 90,
-    gap.after = c(rep(2, length(ordered_pathways) - 1), 2.5),
-    track.margin = c(0.01, 0.01),
-    canvas.xlim = c(-2.05, 2.05),
-    canvas.ylim = c(-2.05, 2.05)
-  )
-
-  chordDiagram(
-    x = chord_df %>% select(Pathway1, Pathway2, value = Cor_Selected),
-    order = ordered_pathways,
-    col = chord_df$color,
-    transparency = 0.2,
-    directional = 0,
-    annotationTrack = "grid",
-    preAllocateTracks = list(track.height = 0.08)
-  )
-
-  circos.trackPlotRegion(
-    track.index = 1,
-    panel.fun = function(x, y) {
-      circos.text(
-        CELL_META$xcenter,
-        CELL_META$ylim[1] + mm_y(3),
-        CELL_META$sector.index,
-        facing = "clockwise",
-        niceFacing = TRUE,
-        adj = c(0, 0.3),
-        cex = 0.7
-      )
-    },
-    bg.border = NA
-  )
-  #plot(hc)  #activate with section 2 and 3
-  dev.off()
-}
-
-```
-
-```{r}
-# ER-positive: choose correlation based on which FDR is smaller
-results_common_pos <- cor_ERpos$COMMON %>%
-  filter(!is.na(Pathway1), !is.na(Pathway2), Pathway1 != Pathway2) %>%
-  mutate(
-    Cor_Selected = ifelse(FDR_DISC < FDR_VALID, Cor_DISC, Cor_VALID)
-  )
-
-# ER-negative: same logic
-results_common_neg <- cor_ERneg$COMMON %>%
-  filter(!is.na(Pathway1), !is.na(Pathway2), Pathway1 != Pathway2) %>%
-  mutate(
-    Cor_Selected = ifelse(FDR_DISC < FDR_VALID, Cor_DISC, Cor_VALID)
-  )
-
-```
-
-```{r}
-plot_chord_diagram(results_common_pos, "Trend", "ERpositive")
-plot_chord_diagram(results_common_neg, "Trend", "ERnegative")
-
-```
-
 <details>
 <summary>⚙️session info⚙️</summary>
 
@@ -428,4 +323,5 @@ sessionInfo()
 ```{r}
 save(list = ls(), file = paste0("3_Opposite_Paths_corr_0.05FDR_", Sys.Date(), ".RData"))
 ```
+
 
