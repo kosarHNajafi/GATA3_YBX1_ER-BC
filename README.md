@@ -18,6 +18,17 @@ software tools or algorithms were developed.
 | `07_CNA_pathifier_covariate_regression.R` | Covariate-adjusted regression of Pathifier PDS scores (ER status, proliferation, hypoxia, CNA burden) |
 | `08_RTN_regulons_AUCell_scoring.R` | RTN-derived GATA3/YBX1 metabolic regulons scored with AUCell in single-cell data |
 | `09_bliss_independence_analysis.R` | Bliss independence analysis of regulator/drug combination effects |
+| `10_ER.SurvivalCurves` | Kaplan-Meier survival curves stratified by ER status, covering four endpoints (OS, DSS, RFS, MFS) at both full follow-up and 5-year-truncated time horizons |
+| `11_ERα.Pathway.SurvivalCurves` | Pathway-Stratified Survival Analysis  |
+| `12_Step1_Paths_ER_Corr` | Pathway Correlation Analysis by ER Status (Discovery vs. Validation, FDR < 0.05)|
+| `13_Step2_Paths_ER_Corr` | Opposite-Trend Pathway Correlations Between ER Statuses|
+|`14_RTN` |  Gene Regulatory Network Reconstruction and Regulon Activity Profiling |
+|`15_RTN_Regulon Count by Fisher test`|Regulon Enrichment for Metabolic Pathway Genes |
+|`16_RTN_GSEA1&2` | Focused TF-Regulon Network and Master Regulator Analysis on Metabolic Genes |
+|`17_BC_Regact_Corr_PDS` | TF Regulon Activity vs. Metabolic Pathway Correlation (Reproducible, |r| > 0.5) |
+|`18_HR_BubblePlot`| Pathway Hazard Ratio Analysis and Cross-Cohort Bubble Plot (ER-stratified) |
+
+
 
 Each script begins with a header describing its purpose, expected input
 files, and output files.
